@@ -134,6 +134,13 @@ func (j *Jumper) pane(ctx context.Context, pid int, verb string, build func(tty 
 		return fmt.Errorf("running osascript: %w", err)
 	}
 
+	return outcome(out, fmt.Errorf("no iTerm2 pane found for pid %d", pid))
+}
+
+// outcome translates a script's marker back into an error. What NOT_FOUND means
+// is the caller's to say: only the operation that ran knows what it was looking
+// for, and creating a tab looks for nothing at all.
+func outcome(out string, notFound error) error {
 	switch strings.TrimSpace(out) {
 	case foundMarker:
 		return nil
@@ -142,7 +149,7 @@ func (j *Jumper) pane(ctx context.Context, pid int, verb string, build func(tty 
 	case noWindowsMarker:
 		return errors.New("iTerm2 is running but has no windows open")
 	case notFoundMarker:
-		return fmt.Errorf("no iTerm2 pane found for pid %d", pid)
+		return notFound
 	default:
 		return fmt.Errorf("unexpected osascript output %q", out)
 	}

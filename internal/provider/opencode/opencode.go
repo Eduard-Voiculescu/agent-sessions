@@ -165,6 +165,10 @@ func lastActive(rec record, path string) time.Time {
 	return time.Time{}
 }
 
+// StartArgv starts opencode fresh. The working directory is the caller's to
+// supply, so nothing about the session being new appears in argv.
+func (p *Provider) StartArgv() []string { return []string{"opencode"} }
+
 // ResumeArgv builds the resume command. --fork is documented only alongside
 // --session or --continue, so it is appended to the session form rather than
 // used on its own.

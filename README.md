@@ -2,8 +2,8 @@
 
 A command and control centre for your coding-agent sessions: one screen that
 shows every session on the machine — running or finished, whatever directory it
-was started in — and lets you read it, reply to it, jump to its terminal, or
-resume it.
+was started in — and lets you read it, reply to it, jump to its terminal, resume
+it, or start a new one anywhere.
 
 `claude agents` shows you the sessions in the directory you happen to be
 standing in. This shows you all of them.
@@ -25,7 +25,7 @@ standing in. This shows you all of them.
   claude    ◐ working                 Search reindex to…  eng-3150-re…  ~/git/acme/search       2d
   claude    -                         Add rate limiting…  eng-3170-ra…  ~/git/acme/web          1h
 
-  ⏎ preview  ^p actions  ^j jump  ^h live  / filter  ? help  q quit
+  ⏎ preview  ^n new  ^p actions  ^j jump  ^h live  / filter  ? help  q quit
 ```
 
 ## Install
@@ -58,6 +58,7 @@ help from outside:
 | --- | --- |
 | `^j` jump to a session's terminal pane | macOS and iTerm2 |
 | `i` send a message into a running session | macOS and iTerm2 |
+| `^n` start a session in a new terminal tab | macOS and iTerm2 |
 | `open PR on GitHub` | the `gh` CLI, authenticated |
 
 The first jump or send raises the macOS Automation consent dialog. Click Allow,
@@ -78,6 +79,7 @@ keys.
 | --- | --- |
 | `⏎` | preview the last messages |
 | `f` | fork into a new session |
+| `^n` | start a session somewhere |
 | `^p` | actions and commands |
 | `^j` | focus the terminal pane running it |
 | `^h` | only sessions with a process |
@@ -103,6 +105,33 @@ watch the reply arrive. A finished session has no process to type into, so
 sending **resumes** it with your message as the opening prompt — which replaces
 `agent-sessions` with the agent itself.
 
+**Starting a session** (`^n`)
+
+Two questions — which agent, then where — asked in a box over the list, so what
+is already running stays on screen while a new one is started:
+
+```
+  AGENT     STATUS     ╭─ start claude — where ───────────────────── esc ─╮  AGE
+▸ claude    ● busy     │ search  _                                       │  now
+  claude    ● waiting: │                                                 │  1m
+  ─────────────────────│ ▸ ~/git/acme/api                     3 sessions │─────
+  claude    ◐ working  │   ~/git/acme/web                      1 session │  2d
+  claude    -          │   ~/git/tools/agent-sessions          1 session │  1h
+                       │                                                 │
+                       │ ↑/↓ move · type a filter or a path · enter start │
+                       ╰─────────────────────────────────────────────────╯
+```
+
+The agents offered are the ones `[providers] enable` leaves on, so there is no
+second list to keep in step. The directories offered are the ones your sessions
+are already in, most-used first; type a path beginning with `/`, `~` or `.` to
+start somewhere new instead.
+
+The agent starts in a new iTerm2 tab and **focus stays here**, so three of them
+can be started in a row. Nothing is added to the table by hand: the agent writes
+its own registry entry, so the row arrives on the next tick with a real pid, and
+`^j`, `i` and `kill process` work on it like any other.
+
 **Actions** (`^p`)
 
 Grouped by what they touch:
@@ -115,7 +144,8 @@ danger       kill process, delete session
 picker       toggle --live filter, reload sessions
 ```
 
-An action that cannot run says why rather than disappearing —
+The palette floats over the list in the same box, so the row being acted on stays
+visible behind it. An action that cannot run says why rather than disappearing —
 `open in Fork — unavailable: fork is not on PATH` — because a missing entry
 tells you nothing to fix.
 

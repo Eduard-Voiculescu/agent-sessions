@@ -259,7 +259,20 @@ func (m model) paletteFrameFor() paletteFrame {
 	return f
 }
 
+// paletteModalChrome is how many of the box's inner lines are not entries: the
+// search line, the blank under it, and the hint with its own blank above.
+const paletteModalChrome = 4
+
+func (m model) paletteModalFrame() modalFrame {
+	return modalFrameFor(m.width, cmp.Or(m.height, defaultHeight), paletteModalChrome, len(m.paletteItems))
+}
+
+// paletteCapacity is how many entries fit wherever the palette is actually
+// drawn, so the cursor's paging math and the render agree about the window.
 func (m model) paletteCapacity() int {
+	if f := m.paletteModalFrame(); f.width != 0 {
+		return f.items
+	}
 	return m.paletteFrameFor().entries
 }
 
@@ -374,6 +387,41 @@ func (m model) reloadSessions() model {
 	}
 	m.offset = 0
 	return m
+}
+
+// paletteModalView floats the palette over the list, so the row it acts on stays
+// on screen behind the box naming it. Below the size a box needs, the
+// full-screen palette stands in.
+func (m model) paletteModalView() string {
+	f := m.paletteModalFrame()
+	if f.width == 0 {
+		return m.paletteView()
+	}
+
+	inner := modalInnerWidth(f.width)
+	content := modalContent(paletteModalItems(m.paletteItems, m.paletteCursor),
+		m.paletteCursor, m.paletteOffset, f.items, inner,
+		[]string{modalSearchLine(m.paletteQuery, inner), ""},
+		"no matching action", "↑/↓ ^u/^d move · enter run · esc back")
+
+	title := modalTitle("actions", m.paletteTarget.Name)
+	return modalOver(m.listView(), title, content, f.width, m.width, cmp.Or(m.height, defaultHeight))
+}
+
+// paletteModalItems maps the palette's own entries onto the modal's. Only a
+// runnable entry can be the selected one: the cursor is kept off headers, and a
+// bar drawn across one would say otherwise.
+func paletteModalItems(entries []entry, cursor int) []modalItem {
+	items := make([]modalItem, 0, len(entries))
+	for i, e := range entries {
+		items = append(items, modalItem{
+			label:    e.label,
+			header:   e.header,
+			blank:    e.blank,
+			selected: i == cursor && e.runnable(),
+		})
+	}
+	return items
 }
 
 func (m model) paletteView() string {

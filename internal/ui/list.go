@@ -41,7 +41,7 @@ const (
 	wordmarkGlyphBottom = "█▀█ ▀▀█"
 	wordmarkGap         = "   "
 
-	keyHints = "⏎ preview  ^p actions  ^j jump  ^h live  / filter  ? help  q quit"
+	keyHints = "⏎ preview  ^n new  ^p actions  ^j jump  ^h live  / filter  ? help  q quit"
 )
 
 // wordmarkGlyphWidth is the "AS" glyph's own width in cells, both rows being
@@ -96,6 +96,15 @@ type Config struct {
 	// iTerm2, and the event loop cannot wait on a subprocess that may be blocked
 	// on a human.
 	Send func(ctx context.Context, pid int, text string) error
+	// StartAgents is the agents that can be started fresh, in the order the
+	// provider registry produced them. It is empty when no registered agent can
+	// start one, which is what ctrl+n reports rather than opening on nothing.
+	StartAgents []string
+	// Start launches agent as a new terminal session in dir. A closure for the
+	// same reasons Jump and Send are: this package names neither iTerm2 nor any
+	// provider, and the event loop cannot wait on a subprocess that may be
+	// blocked on a human.
+	Start func(ctx context.Context, agent, dir string) error
 	// Preview reads the last messages of a session's transcript, for Enter to
 	// show before resuming. It runs as a tea.Cmd, not inline: like Jump, it does
 	// I/O that must not block rendering, the tick or ctrl+c.
@@ -161,6 +170,15 @@ type model struct {
 	previewGen    int
 	composing     bool
 	composeText   string
+	starting      bool
+	startStep     startStep
+	startAgents   []string
+	startAgent    string
+	startQuery    string
+	startCursor   int
+	startOffset   int
+	startDirs     []startDir
+	start         func(context.Context, string, string) error
 	help          bool
 	palette       bool
 	paletteQuery  string
@@ -222,6 +240,8 @@ func newModel(cfg Config) model {
 		jump:           cfg.Jump,
 		send:           cfg.Send,
 		preview:        cfg.Preview,
+		startAgents:    cfg.StartAgents,
+		start:          cfg.Start,
 		liveOnly:       cfg.LiveOnly,
 		cwd:            cfg.Cwd,
 		ticketPrefixes: cfg.TicketPrefixes,
@@ -291,6 +311,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case actionResultMsg:
 		return m.handleActionResult(msg)
 
+	case startResultMsg:
+		return m.handleStartResult(msg)
+
 	case tea.KeyMsg:
 		// ctrl+c quits from every mode, before the mode dispatch gets a chance to
 		// swallow it: a TUI that keeps running on ctrl+c reads as hung.
@@ -303,6 +326,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Type == tea.KeyCtrlP && !m.palette && !m.confirming && !m.previewing && !m.composing {
 			return m.openPalette(), nil
 		}
+		// ctrl+n is intercepted here for the same reason ctrl+p is — the row
+		// filter would otherwise swallow it — but never over a mode that owns the
+		// keyboard, where an n is text somebody is typing.
+		if msg.Type == tea.KeyCtrlN && !m.palette && !m.confirming && !m.previewing && !m.composing && !m.starting {
+			return m.openStart(), nil
+		}
 		if m.palette {
 			return m.updatePalette(msg)
 		}
@@ -311,6 +340,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.composing {
 			return m.updateComposing(msg)
+		}
+		if m.starting {
+			return m.updateStarting(msg)
 		}
 		if m.previewing {
 			return m.updatePreviewing(msg)
@@ -619,16 +651,26 @@ func scrollWindow(cursor, offset, total, capacity int) int {
 	return start
 }
 
-// View assembles the frame line by line, so what it draws and what frameFor
-// reserved cannot drift apart.
+// View picks what the frame is. The two choosers float over the list rather than
+// replacing it: the palette acts on a row, and blanking the screen hid the very
+// row it was acting on, while starting a session is a decision made against what
+// is already running.
 func (m model) View() string {
 	if m.palette {
-		return m.paletteView()
+		return m.paletteModalView()
+	}
+	if m.starting {
+		return m.startModalView()
 	}
 	if m.previewing {
 		return m.previewView()
 	}
+	return m.listView()
+}
 
+// listView assembles the frame line by line, so what it draws and what frameFor
+// reserved cannot drift apart.
+func (m model) listView() string {
 	rows := m.visible()
 	f := m.frameFor(rows)
 	divider := boundary(rows)

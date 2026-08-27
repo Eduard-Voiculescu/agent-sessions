@@ -157,6 +157,10 @@ func (p *Provider) ResumeArgv(s session.Session, fork bool) ([]string, error) {
 	return argv, nil
 }
 
+// StartArgv starts Claude Code fresh. The working directory is the caller's to
+// supply, so nothing about the session being new appears in argv.
+func (p *Provider) StartArgv() []string { return []string{"claude"} }
+
 // ResumeWithPromptArgv resumes with prompt as the opening message. The
 // separator is not optional: Claude Code takes the prompt positionally, so
 // without it a message beginning with a dash is parsed as a flag —

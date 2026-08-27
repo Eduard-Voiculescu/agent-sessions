@@ -312,3 +312,12 @@ func TestResumeArgvRefusesAnIDThatWouldParseAsAFlag(t *testing.T) {
 		})
 	}
 }
+
+func TestStartArgvStartsOpencodeFresh(t *testing.T) {
+	got := New(t.TempDir()).StartArgv()
+
+	want := []string{"opencode"}
+	if !slices.Equal(got, want) {
+		t.Errorf("StartArgv() = %v, want %v", got, want)
+	}
+}

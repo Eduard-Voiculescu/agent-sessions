@@ -333,3 +333,12 @@ func TestDiscoveredSessionsCannotSmuggleAFlagOutOfAFilename(t *testing.T) {
 		t.Errorf("ResumeArgv() accepted the id %q read from a filename", found[0].ID)
 	}
 }
+
+func TestStartArgvStartsClaudeFresh(t *testing.T) {
+	got := New(t.TempDir()).StartArgv()
+
+	want := []string{"claude"}
+	if !slices.Equal(got, want) {
+		t.Errorf("StartArgv() = %v, want %v", got, want)
+	}
+}

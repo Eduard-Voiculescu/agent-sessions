@@ -21,6 +21,7 @@ type helpBinding struct {
 var helpBindings = []helpBinding{
 	{"⏎", "preview the last messages"},
 	{"f", "fork into a new session"},
+	{"^n", "start a session somewhere"},
 	{"^p", "actions and commands"},
 	{"^j", "focus its terminal pane"},
 	{"^h", "only sessions with a process"},

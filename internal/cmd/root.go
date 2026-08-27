@@ -372,11 +372,13 @@ func pickerConfig(ctx context.Context, opts *Options, sessions []session.Session
 		Reload: func() ([]session.Session, error) {
 			return loadSessions(ctx, opts)
 		},
-		Commands:   func() []Command { return globalCommands(opts) },
-		ToggleLive: toggleLive(opts),
-		Jump:       termjump.New().Jump,
-		Send:       termjump.New().Send,
-		Preview:    previewFor(registry),
+		Commands:    func() []Command { return globalCommands(opts) },
+		ToggleLive:  toggleLive(opts),
+		Jump:        termjump.New().Jump,
+		Send:        termjump.New().Send,
+		StartAgents: registry.Startable(),
+		Start:       startSession(registry, termjump.New().Start),
+		Preview:     previewFor(registry),
 		// Read through accessors, not copied: globalCommands mutates these two on
 		// the same opts the Filter closure above reads, so a copy would leave the
 		// header block reporting the filters the picker started with.
@@ -384,6 +386,23 @@ func pickerConfig(ctx context.Context, opts *Options, sessions []session.Session
 		Cwd:            func() string { return opts.Cwd },
 		TicketPrefixes: opts.TicketPrefixes,
 		ClaudeDir:      cmp.Or(opts.ClaudeDir, claude.Dir()),
+	}
+}
+
+// startSession resolves an agent's own start argv and hands it to the terminal.
+// spawn is a parameter rather than termjump reached directly, so the resolution
+// is testable without an iTerm2 and without moving anybody's windows.
+func startSession(registry *provider.Registry, spawn func(ctx context.Context, dir string, argv []string) error) func(context.Context, string, string) error {
+	return func(ctx context.Context, agent, dir string) error {
+		p, ok := registry.Find(agent)
+		if !ok {
+			return fmt.Errorf("no provider registered for agent %q", agent)
+		}
+		starter, ok := p.(provider.Starter)
+		if !ok {
+			return fmt.Errorf("%s cannot start a new session", agent)
+		}
+		return spawn(ctx, dir, starter.StartArgv())
 	}
 }
 

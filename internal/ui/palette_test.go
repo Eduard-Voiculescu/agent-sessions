@@ -894,3 +894,22 @@ func TestPaletteEnterOnAHeaderRunsNothing(t *testing.T) {
 		t.Error("enter on a header closed the palette")
 	}
 }
+
+// The palette acts on one row, and blanking the screen used to hide which one.
+// As a modal the row stays visible behind the box that names it.
+func TestPaletteModalFloatsOverTheSessionList(t *testing.T) {
+	m := feed(paletteModel(t, []action.Action{fakeAction{id: "a", label: "an action"}}, nil),
+		tea.WindowSizeMsg{Width: 100, Height: 24}, ctrlP)
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+
+	if len(lines) != 24 {
+		t.Errorf("View() rendered %d lines, want the terminal's own 24", len(lines))
+	}
+	for _, want := range []string{"AGENT", "╭─ actions", "esc ─╮", "an action"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("View() is missing %q:\n%s", want, view)
+		}
+	}
+}

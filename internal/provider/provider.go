@@ -34,6 +34,14 @@ type Liveness interface {
 	Live(ctx context.Context) ([]session.Session, error)
 }
 
+// Starter is implemented only by agents that can be started fresh rather than
+// resumed from stored state. There is no directory parameter: every agent takes
+// its working directory from the process it is started in, and the caller
+// supplies that.
+type Starter interface {
+	StartArgv() []string
+}
+
 type Registry struct {
 	providers []Provider
 }
@@ -70,6 +78,20 @@ func (r *Registry) Live(ctx context.Context) ([]session.Session, error) {
 // Providers returns the registered providers, in registration order.
 func (r *Registry) Providers() []Provider {
 	return slices.Clone(r.providers)
+}
+
+// Startable is the names of the registered providers that can start a fresh
+// session, in registration order. The picker's own list of agents comes from
+// here, so narrowing [providers] enable narrows what can be started with no
+// second list to keep in step.
+func (r *Registry) Startable() []string {
+	var names []string
+	for _, p := range r.providers {
+		if _, ok := p.(Starter); ok {
+			names = append(names, p.Name())
+		}
+	}
+	return names
 }
 
 func (r *Registry) Find(agent string) (Provider, bool) {

@@ -29,6 +29,11 @@ is treated as hostile:
   overridden in the subprocess environment (`internal/action/githarden.go`).
 - A pid is confirmed to still belong to the process its record describes before
   it is signalled.
+- A directory that `^n` starts an agent in is quoted as one shell word, and so is
+  every element of the agent's own argv, because iTerm2's `write text` hands what
+  it is given to a shell. The directory is checked to exist and to be a
+  directory, and a control character in either is refused rather than escaped
+  (`internal/termjump/start.go`).
 - Transcripts are opened with `O_NOFOLLOW`, so a symlink planted among them is
   not read.
 
@@ -47,6 +52,11 @@ These are known and not fully closable:
 - **`kill process` sends SIGTERM to a pid from a file.** The pid's age is
   checked against the record, which closes pid recycling, but a process that
   genuinely is the recorded one is killed as asked.
+- **`^n` starts an agent in a directory you chose.** The directories offered come
+  from session records, which any process running as you can write; a path is
+  quoted so it stays one word, but an agent started in a repository you do not
+  recognise still reads that repository. The list says how many sessions each
+  directory holds, which is the signal that you have worked there before.
 - **`send` types into a terminal pane.** The message is your own text, and
   control characters are refused, but it is delivered to whatever is reading
   that pane.

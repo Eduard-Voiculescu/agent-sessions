@@ -15,6 +15,7 @@ import (
 	"github.com/eduardvoiculescu/agent-sessions/internal/config"
 	"github.com/eduardvoiculescu/agent-sessions/internal/provider"
 	"github.com/eduardvoiculescu/agent-sessions/internal/provider/claude"
+	"github.com/eduardvoiculescu/agent-sessions/internal/provider/opencode"
 	"github.com/eduardvoiculescu/agent-sessions/internal/session"
 	"github.com/eduardvoiculescu/agent-sessions/internal/ui"
 )
@@ -963,5 +964,78 @@ func TestConfigCarriesTheProviderSettings(t *testing.T) {
 	}
 	if opts.OpencodeDir != "/srv/opencode" {
 		t.Errorf("OpencodeDir = %q, want the configured path", opts.OpencodeDir)
+	}
+}
+
+// readOnlyProvider implements no Starter, which is how a provider that can only
+// read stored sessions stays legal.
+type readOnlyProvider struct{}
+
+func (readOnlyProvider) Name() string { return "readonly" }
+
+func (readOnlyProvider) Discover(context.Context, int) ([]session.Session, error) { return nil, nil }
+
+func (readOnlyProvider) ResumeArgv(session.Session, bool) ([]string, error) { return nil, nil }
+
+func TestPickerConfigPublishesTheStartableAgents(t *testing.T) {
+	registry := provider.NewRegistry(claude.New(t.TempDir()), opencode.New(t.TempDir()), readOnlyProvider{})
+
+	cfg := pickerConfig(context.Background(), &Options{}, nil, nil, registry)
+
+	if !reflect.DeepEqual(cfg.StartAgents, []string{"claude", "opencode"}) {
+		t.Errorf("Config.StartAgents = %v, want [claude opencode]", cfg.StartAgents)
+	}
+	if cfg.Start == nil {
+		t.Error("Config.Start is nil, want the spawn wired")
+	}
+}
+
+func TestStartSessionHandsTheProvidersOwnArgvToTheTerminal(t *testing.T) {
+	var gotDir string
+	var gotArgv []string
+	start := startSession(provider.NewRegistry(claude.New(t.TempDir())),
+		func(_ context.Context, dir string, argv []string) error {
+			gotDir, gotArgv = dir, argv
+			return nil
+		})
+
+	if err := start(context.Background(), "claude", "/Users/dev/git/api"); err != nil {
+		t.Fatalf("start() error = %v, want nil", err)
+	}
+	if gotDir != "/Users/dev/git/api" {
+		t.Errorf("dir = %q, want /Users/dev/git/api", gotDir)
+	}
+	if !reflect.DeepEqual(gotArgv, []string{"claude"}) {
+		t.Errorf("argv = %v, want [claude]", gotArgv)
+	}
+}
+
+func TestStartSessionRefusesWhatItCannotStart(t *testing.T) {
+	tests := []struct {
+		name  string
+		agent string
+		want  string
+	}{
+		{name: "unregistered", agent: "codex", want: "no provider registered"},
+		{name: "not a starter", agent: "readonly", want: "cannot start"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ran := false
+			start := startSession(provider.NewRegistry(readOnlyProvider{}),
+				func(context.Context, string, []string) error {
+					ran = true
+					return nil
+				})
+
+			err := start(context.Background(), tt.agent, "/Users/dev/git/api")
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("start() error = %v, want it to mention %q", err, tt.want)
+			}
+			if ran {
+				t.Error("the terminal was asked to spawn something anyway")
+			}
+		})
 	}
 }

@@ -37,6 +37,9 @@ var (
 	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	// selectedBarStyle fills a modal's selected row rather than colouring its
+	// text: a filled bar is found at a glance where a coloured word is read.
+	selectedBarStyle = lipgloss.NewStyle().Reverse(true)
 )
 
 // columns is one frame's column widths, in row order.

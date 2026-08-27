@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -145,5 +146,32 @@ func TestRegistryStampsTheAgentOnEveryRow(t *testing.T) {
 		if s.Agent != "claude" {
 			t.Errorf("Sessions() row %q has Agent %q, want the provider name stamped on it", s.ID, s.Agent)
 		}
+	}
+}
+
+type fakeStarterProvider struct {
+	fakeProvider
+}
+
+func (f fakeStarterProvider) StartArgv() []string { return []string{f.name} }
+
+func TestRegistryStartableListsOnlyStartersInRegistrationOrder(t *testing.T) {
+	registry := NewRegistry(
+		fakeProvider{name: "readonly"},
+		fakeStarterProvider{fakeProvider{name: "claude"}},
+		fakeStarterProvider{fakeProvider{name: "opencode"}},
+	)
+
+	got := registry.Startable()
+
+	want := []string{"claude", "opencode"}
+	if !slices.Equal(got, want) {
+		t.Errorf("Startable() = %v, want %v", got, want)
+	}
+}
+
+func TestRegistryStartableIsEmptyWithoutStarters(t *testing.T) {
+	if got := NewRegistry(fakeProvider{name: "readonly"}).Startable(); len(got) != 0 {
+		t.Errorf("Startable() = %v, want none", got)
 	}
 }
