@@ -39,6 +39,9 @@ type Options struct {
 	Hidden      []string
 	Providers   []string
 	OpencodeDir string
+	// Overlay is the attention pet's settings, carried here so `config --json`
+	// can publish them resolved. The picker itself never reads them.
+	Overlay config.Overlay
 	// ConfigPath is where the config was read from, "" when no file exists. It
 	// is reported by the config command, which is the only way to answer "which
 	// file did you actually read".
@@ -98,6 +101,8 @@ func newRootCommand(opts *Options, run runners) *cobra.Command {
 	root.AddCommand(newListCommand(opts, run.list))
 	root.AddCommand(newConfigCommand(opts))
 	root.AddCommand(newPurgeCommand(opts))
+	root.AddCommand(newWatchCommand(opts))
+	root.AddCommand(newJumpCommand(opts, termjump.New().Jump))
 
 	return root
 }
@@ -235,12 +240,29 @@ func applyConfig(cmd *cobra.Command, opts *Options, file config.File) error {
 		source("prefixes", "config")
 	}
 
+	if file.Overlay.Corner != "" && !slices.Contains(overlayCorners(), file.Overlay.Corner) {
+		return unknownValue(file.Path, "overlay corner", file.Overlay.Corner, overlayCorners())
+	}
+	opts.Overlay = file.Overlay
+	// Checked field by field rather than against the zero value: Overlay holds a
+	// slice, which is not comparable.
+	if file.Overlay.Corner != "" || file.Overlay.Size != nil || file.Overlay.OffsetX != nil ||
+		file.Overlay.Sound != nil || len(file.Overlay.Raise) > 0 {
+		source("overlay", "config")
+	}
+
 	return nil
 }
 
 // agentNames is every agent whose contributed actions can be hidden. It is a
 // literal until spec 2 lands more providers than Claude Code.
 func agentNames() []string { return []string{"claude"} }
+
+// overlayCorners is where the pet may sit, in the order the config file's own
+// comment lists them.
+func overlayCorners() []string {
+	return []string{"bottom-left", "bottom-right", "top-left", "top-right"}
+}
 
 // unknownValue names what is valid, because a message that only says the value
 // is wrong leaves nothing to correct towards. The file and line come from the

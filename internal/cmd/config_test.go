@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -248,5 +249,91 @@ func TestSourceAnnotationFollowsThePrecedenceChain(t *testing.T) {
 				t.Errorf("annotation = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestConfigJSONPublishesTheResolvedOverlay(t *testing.T) {
+	opts := &Options{}
+	root := newRootCommand(opts, noopRunners())
+	corner := "top-right"
+	offsetX, offsetY, size := 40, 12, 96
+	if err := applyConfig(root, opts, config.File{
+		Path:    "/tmp/x/config",
+		Overlay: config.Overlay{Corner: corner, OffsetX: &offsetX, OffsetY: &offsetY, Size: &size, Raise: []string{"waiting", "blocked"}},
+	}); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+
+	out := &bytes.Buffer{}
+	cmd := newConfigCommand(opts)
+	cmd.SetOut(out)
+	cmd.SetArgs([]string{"--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var got struct {
+		File    string `json:"file"`
+		Overlay struct {
+			Corner string   `json:"corner"`
+			Offset [2]int   `json:"offset"`
+			Size   int      `json:"size"`
+			Raise  []string `json:"raise"`
+			Sound  bool     `json:"sound"`
+		} `json:"overlay"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("config --json does not decode: %v\n%s", err, out.String())
+	}
+
+	if got.File != "/tmp/x/config" {
+		t.Errorf("file = %q, want the path it was read from", got.File)
+	}
+	if got.Overlay.Corner != corner || got.Overlay.Offset != [2]int{40, 12} || got.Overlay.Size != 96 {
+		t.Errorf("overlay = %+v, want the configured corner, offset and size", got.Overlay)
+	}
+	if len(got.Overlay.Raise) != 2 {
+		t.Errorf("raise = %v, want both classes", got.Overlay.Raise)
+	}
+}
+
+// The pet reads its settings from here, so an unconfigured machine must publish
+// the defaults rather than zeroes — a size of 0 is an invisible pet.
+func TestConfigJSONFillsTheOverlayDefaults(t *testing.T) {
+	out := &bytes.Buffer{}
+	cmd := newConfigCommand(&Options{})
+	cmd.SetOut(out)
+	cmd.SetArgs([]string{"--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var got struct {
+		Overlay struct {
+			Corner string   `json:"corner"`
+			Offset [2]int   `json:"offset"`
+			Size   int      `json:"size"`
+			Raise  []string `json:"raise"`
+		} `json:"overlay"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("config --json does not decode: %v", err)
+	}
+
+	if got.Overlay.Corner != "bottom-left" || got.Overlay.Offset != [2]int{24, 24} || got.Overlay.Size != 72 {
+		t.Errorf("overlay = %+v, want the documented defaults", got.Overlay)
+	}
+	if len(got.Overlay.Raise) != 1 || got.Overlay.Raise[0] != "waiting" {
+		t.Errorf("raise = %v, want [waiting]", got.Overlay.Raise)
+	}
+}
+
+// The human output is what somebody reads when an action is missing; --json must
+// not change it.
+func TestConfigWithoutJSONStillPrintsTheTable(t *testing.T) {
+	out := renderedConfig(t, nil, config.File{Path: "/tmp/x/config"})
+
+	if !strings.Contains(out, "editor") || !strings.Contains(out, "actions") {
+		t.Errorf("the human output lost its shape:\n%s", out)
 	}
 }

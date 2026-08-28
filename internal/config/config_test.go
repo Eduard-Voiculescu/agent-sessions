@@ -344,3 +344,58 @@ func TestLoadFromLeavesOtherTildesAlone(t *testing.T) {
 		t.Errorf("Cwd = %q, want another user's home left unresolved", got.Cwd)
 	}
 }
+
+func TestLoadFromReadsTheOverlaySection(t *testing.T) {
+	path := write(t, `
+[overlay]
+corner = top-right
+offset = 40,12
+size   = 96
+raise  = waiting, blocked
+sound  = true
+`)
+
+	file, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+
+	if file.Overlay.Corner != "top-right" {
+		t.Errorf("Corner = %q, want top-right", file.Overlay.Corner)
+	}
+	if file.Overlay.OffsetX == nil || *file.Overlay.OffsetX != 40 {
+		t.Errorf("OffsetX = %v, want 40", file.Overlay.OffsetX)
+	}
+	if file.Overlay.OffsetY == nil || *file.Overlay.OffsetY != 12 {
+		t.Errorf("OffsetY = %v, want 12", file.Overlay.OffsetY)
+	}
+	if file.Overlay.Size == nil || *file.Overlay.Size != 96 {
+		t.Errorf("Size = %v, want 96", file.Overlay.Size)
+	}
+	if len(file.Overlay.Raise) != 2 || file.Overlay.Raise[0] != "waiting" {
+		t.Errorf("Raise = %v, want [waiting blocked]", file.Overlay.Raise)
+	}
+	if file.Overlay.Sound == nil || !*file.Overlay.Sound {
+		t.Errorf("Sound = %v, want true", file.Overlay.Sound)
+	}
+}
+
+// A malformed offset is reported with its line, like every other typed value in
+// this file: a setting silently ignored reads as a setting applied.
+func TestLoadFromRejectsAMalformedOffset(t *testing.T) {
+	tests := map[string]string{
+		"one number":    "[overlay]\noffset = 24\n",
+		"three numbers": "[overlay]\noffset = 1,2,3\n",
+		"not a number":  "[overlay]\noffset = left,12\n",
+		"negative":      "[overlay]\noffset = -4,12\n",
+	}
+
+	for name, body := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadFrom(write(t, body))
+			if err == nil || !strings.Contains(err.Error(), "offset") {
+				t.Errorf("LoadFrom() error = %v, want it to name offset", err)
+			}
+		})
+	}
+}

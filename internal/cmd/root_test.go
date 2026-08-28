@@ -1039,3 +1039,39 @@ func TestStartSessionRefusesWhatItCannotStart(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyConfigTakesTheOverlaySection(t *testing.T) {
+	opts := &Options{}
+	root := newRootCommand(opts, noopRunners())
+
+	corner := "top-left"
+	size := 96
+	if err := applyConfig(root, opts, config.File{Overlay: config.Overlay{Corner: corner, Size: &size}}); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+
+	if opts.Overlay.Corner != corner {
+		t.Errorf("Overlay.Corner = %q, want %q", opts.Overlay.Corner, corner)
+	}
+	if opts.Overlay.Size == nil || *opts.Overlay.Size != 96 {
+		t.Errorf("Overlay.Size = %v, want 96", opts.Overlay.Size)
+	}
+}
+
+// An unknown value names the ones that exist, like every other enumerated
+// setting here: a message that only says the value is wrong leaves nothing to
+// correct towards.
+func TestApplyConfigRejectsAnUnknownCorner(t *testing.T) {
+	opts := &Options{}
+	root := newRootCommand(opts, noopRunners())
+
+	err := applyConfig(root, opts, config.File{Overlay: config.Overlay{Corner: "middle"}})
+	if err == nil {
+		t.Fatal("applyConfig() error = nil, want a refusal")
+	}
+	for _, want := range []string{"middle", "bottom-left", "top-right"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}

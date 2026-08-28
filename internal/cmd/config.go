@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"cmp"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +25,7 @@ import (
 type configOptions struct {
 	initialise bool
 	force      bool
+	json       bool
 }
 
 func newConfigCommand(opts *Options) *cobra.Command {
@@ -45,12 +48,16 @@ func newConfigCommand(opts *Options) *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", path)
 				return nil
 			}
+			if local.json {
+				return renderConfigJSON(cmd, opts)
+			}
 			return renderConfig(cmd, opts)
 		},
 	}
 
 	cmd.Flags().BoolVar(&local.initialise, "init", false, "write a commented starter config file")
 	cmd.Flags().BoolVar(&local.force, "force", false, "overwrite an existing file when used with --init")
+	cmd.Flags().BoolVar(&local.json, "json", false, "emit the resolved configuration as JSON")
 
 	return cmd
 }
@@ -156,6 +163,108 @@ func orDash(value, fallback string) string {
 	return value
 }
 
+// resolvedConfig is the whole configuration as one document, for a consumer that
+// is not a person: the attention pet reads its own settings from here rather than
+// parsing this file's format in another language.
+type resolvedConfig struct {
+	File        string            `json:"file"`
+	Editor      string            `json:"editor"`
+	VCS         string            `json:"vcs"`
+	Tickets     resolvedTickets   `json:"tickets"`
+	Hidden      []string          `json:"hidden"`
+	Limit       int               `json:"limit"`
+	Live        bool              `json:"live"`
+	Cwd         string            `json:"cwd"`
+	ClaudeDir   string            `json:"claudeDir"`
+	OpencodeDir string            `json:"opencodeDir"`
+	Providers   []string          `json:"providers"`
+	Overlay     resolvedOverlay   `json:"overlay"`
+	Sources     map[string]string `json:"sources"`
+}
+
+type resolvedTickets struct {
+	Provider  string   `json:"provider"`
+	Workspace string   `json:"workspace"`
+	Prefixes  []string `json:"prefixes"`
+}
+
+type resolvedOverlay struct {
+	Corner string   `json:"corner"`
+	Offset [2]int   `json:"offset"`
+	Size   int      `json:"size"`
+	Raise  []string `json:"raise"`
+	Sound  bool     `json:"sound"`
+}
+
+// The pet's defaults live here rather than in its own language, so one place
+// answers "where does it sit and how big is it" for both halves of this program.
+func overlayDefaults() resolvedOverlay {
+	return resolvedOverlay{
+		Corner: "bottom-left",
+		Offset: [2]int{24, 24},
+		Size:   72,
+		Raise:  []string{"waiting"},
+	}
+}
+
+func resolveOverlay(overlay config.Overlay) resolvedOverlay {
+	out := overlayDefaults()
+	if overlay.Corner != "" {
+		out.Corner = overlay.Corner
+	}
+	if overlay.OffsetX != nil {
+		out.Offset[0] = *overlay.OffsetX
+	}
+	if overlay.OffsetY != nil {
+		out.Offset[1] = *overlay.OffsetY
+	}
+	if overlay.Size != nil {
+		out.Size = *overlay.Size
+	}
+	if len(overlay.Raise) > 0 {
+		out.Raise = overlay.Raise
+	}
+	if overlay.Sound != nil {
+		out.Sound = *overlay.Sound
+	}
+	return out
+}
+
+func renderConfigJSON(cmd *cobra.Command, opts *Options) error {
+	// Not cmp.Or: a slice is not comparable, so the empty case is spelt out.
+	providers := opts.Providers
+	if len(providers) == 0 {
+		providers = providerNames()
+	}
+
+	document := resolvedConfig{
+		File:   opts.ConfigPath,
+		Editor: opts.Editor.Name,
+		VCS:    opts.VCS.Name,
+		Tickets: resolvedTickets{
+			Provider:  ticketSummary(opts),
+			Workspace: opts.Workspace,
+			Prefixes:  opts.TicketPrefixes,
+		},
+		Hidden:      opts.Hidden,
+		Limit:       opts.Limit,
+		Live:        opts.LiveOnly,
+		Cwd:         opts.Cwd,
+		ClaudeDir:   cmp.Or(opts.ClaudeDir, claude.Dir()),
+		OpencodeDir: cmp.Or(opts.OpencodeDir, opencode.Dir()),
+		Providers:   providers,
+		Overlay:     resolveOverlay(opts.Overlay),
+		Sources:     opts.ConfigSources,
+	}
+
+	encoder := json.NewEncoder(cmd.OutOrStdout())
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(document); err != nil {
+		return fmt.Errorf("encoding the configuration: %w", err)
+	}
+	return nil
+}
+
 // starter is written commented out throughout: a starter file that turned
 // settings on by writing them would change behaviour the moment it was created,
 // which is not what "show me the shape of this file" should do.
@@ -197,6 +306,13 @@ const starter = `# agent-sessions configuration.
 
 # [opencode]
 # dir = ~/.local/share/opencode/storage
+
+# [overlay]
+# corner = bottom-left     # bottom-left | bottom-right | top-left | top-right
+# offset = 24,24           # points from that corner, x,y
+# size   = 72              # sprite box, points
+# raise  = waiting         # status classes that raise the pet
+# sound  = false
 `
 
 func writeStarter(path string, force bool) error {

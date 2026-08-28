@@ -59,6 +59,7 @@ help from outside:
 | `^j` jump to a session's terminal pane | macOS and iTerm2 |
 | `i` send a message into a running session | macOS and iTerm2 |
 | `^n` start a session in a new terminal tab | macOS and iTerm2 |
+| `jump` the command | macOS and iTerm2 |
 | `open PR on GitHub` | the `gh` CLI, authenticated |
 
 The first jump or send raises the macOS Automation consent dialog. Click Allow,
@@ -154,8 +155,18 @@ tells you nothing to fix.
 ```sh
 agent-sessions list                 # the table, no TUI
 agent-sessions list --json          # for scripts
+agent-sessions watch                # one JSON line per tick, for anything watching
+agent-sessions jump --pid 51234      # focus the pane running a session
 agent-sessions config               # what was configured, and where from
+agent-sessions config --json        # the same, resolved, for a program
 agent-sessions purge --dry-run      # what deleting sessions left behind
+```
+
+`watch` is a status pipe: each line carries every session plus `worst` and
+`attention` — the class that most wants a human, and how many sessions are in it.
+
+```sh
+agent-sessions watch | jq -c '{worst, attention}'
 ```
 
 `delete session` moves a transcript to `~/.claude/.agent-sessions-trash` rather
@@ -220,6 +231,13 @@ cwd  = ~/git              # start filtered to one directory tree
 
 [claude]
 dir = ~/.claude           # where Claude Code keeps its state
+
+[overlay]
+corner = bottom-left      # bottom-left | bottom-right | top-left | top-right
+offset = 24,24            # points from that corner, x,y
+size   = 72               # sprite box, points
+raise  = waiting          # status classes that raise the attention pet
+sound  = false
 ```
 
 A leading `~` is expanded, since no shell reads this file — left literal it

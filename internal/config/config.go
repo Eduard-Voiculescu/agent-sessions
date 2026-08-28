@@ -35,6 +35,19 @@ type File struct {
 	// empty, so a fresh install with no config lists every agent it can read.
 	Providers   []string
 	OpencodeDir string
+	Overlay     Overlay
+}
+
+// Overlay is the attention pet's own settings. Pointers for the numbers, like
+// Limit and Live, so a key set to its own zero value is distinguishable from a
+// key nobody wrote — an offset of 0,0 is a corner someone chose.
+type Overlay struct {
+	Corner  string
+	OffsetX *int
+	OffsetY *int
+	Size    *int
+	Raise   []string
+	Sound   *bool
 }
 
 type Tickets struct {
@@ -54,6 +67,7 @@ var schema = map[string][]string{
 	"forge":     {"provider"},
 	"list":      {"limit"},
 	"opencode":  {"dir"},
+	"overlay":   {"corner", "offset", "raise", "size", "sound"},
 	"providers": {"enable"},
 	"tickets":   {"provider", "workspace", "prefixes"},
 	"vcs":       {"default"},
@@ -135,6 +149,18 @@ func LoadFrom(path string) (File, error) {
 	if file.Live, err = values.boolean(path, "filters", "live"); err != nil {
 		return File{}, err
 	}
+
+	file.Overlay.Corner = values.text("overlay", "corner")
+	file.Overlay.Raise = list(values.text("overlay", "raise"))
+	if file.Overlay.Size, err = values.integer(path, "overlay", "size"); err != nil {
+		return File{}, err
+	}
+	if file.Overlay.Sound, err = values.boolean(path, "overlay", "sound"); err != nil {
+		return File{}, err
+	}
+	if file.Overlay.OffsetX, file.Overlay.OffsetY, err = values.point(path, "overlay", "offset"); err != nil {
+		return File{}, err
+	}
 	return file, nil
 }
 
@@ -183,6 +209,31 @@ func (v settings) boolean(path, section, key string) (*bool, error) {
 		return &no, nil
 	}
 	return nil, fmt.Errorf("%s:%d: %s in [%s] must be true or false, not %q", path, raw.line, key, section, raw.text)
+}
+
+// point takes "x,y" of two non-negative whole numbers. An offset is measured
+// from a corner, so a negative one would place the pet off the screen it was
+// asked to sit on.
+func (v settings) point(path, section, key string) (*int, *int, error) {
+	raw, ok := v[section][key]
+	if !ok || raw.text == "" {
+		return nil, nil, nil
+	}
+
+	parts := strings.Split(raw.text, ",")
+	if len(parts) != 2 {
+		return nil, nil, fmt.Errorf("%s:%d: %s in [%s] must be two whole numbers as x,y, not %q", path, raw.line, key, section, raw.text)
+	}
+
+	pair := make([]int, 2)
+	for i, part := range parts {
+		n, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil || n < 0 {
+			return nil, nil, fmt.Errorf("%s:%d: %s in [%s] must be two non-negative whole numbers as x,y, not %q", path, raw.line, key, section, raw.text)
+		}
+		pair[i] = n
+	}
+	return &pair[0], &pair[1], nil
 }
 
 // expandHome resolves a leading ~ against the home directory. Only a leading
