@@ -13,6 +13,7 @@ import (
 
 	"github.com/eduardvoiculescu/agent-sessions/internal/action"
 	"github.com/eduardvoiculescu/agent-sessions/internal/config"
+	"github.com/eduardvoiculescu/agent-sessions/internal/label"
 	"github.com/eduardvoiculescu/agent-sessions/internal/provider"
 	"github.com/eduardvoiculescu/agent-sessions/internal/provider/claude"
 	"github.com/eduardvoiculescu/agent-sessions/internal/resume"
@@ -338,7 +339,7 @@ func runPicker(cmd *cobra.Command, opts *Options) error {
 	}
 
 	registry := registryFor(opts)
-	choice, chosen, err := ui.Run(pickerConfig(ctx, opts, sessions, loadErr, registry))
+	choice, chosen, err := ui.Run(pickerConfigWith(ctx, opts, sessions, loadErr, registry, label.Open()))
 	if err != nil {
 		return err
 	}
@@ -378,6 +379,12 @@ func resumeArgv(agent provider.Provider, choice ui.Choice) ([]string, error) {
 // so the wiring can be tested directly: ui.Run blocks on a real terminal, so a
 // test exercises this instead of the picker itself.
 func pickerConfig(ctx context.Context, opts *Options, sessions []session.Session, loadErr error, registry *provider.Registry) ui.Config {
+	return pickerConfigWith(ctx, opts, sessions, loadErr, registry, label.Open())
+}
+
+// pickerConfigWith takes the names store as a parameter so a test can point it at
+// a temporary file rather than at the developer's own.
+func pickerConfigWith(ctx context.Context, opts *Options, sessions []session.Session, loadErr error, registry *provider.Registry, names *label.Store) ui.Config {
 	filter := func(sessions []session.Session) []session.Session {
 		return FilterOptions(sessions, opts)
 	}
@@ -386,14 +393,19 @@ func pickerConfig(ctx context.Context, opts *Options, sessions []session.Session
 		Sessions: sessions,
 		Refresh: func() []session.Session {
 			live, _ := registry.Live(ctx)
+			// The names are applied to the live set as well as to the baseline: a
+			// session renamed before it had written a transcript exists only here,
+			// and Merge takes the label from whichever side carries it.
+			applyNames(live, names)
 			return filter(live)
 		},
 		Filter:  filter,
 		LoadErr: loadErr,
 		Actions: actionsFor(opts, registry),
 		Reload: func() ([]session.Session, error) {
-			return loadSessions(ctx, opts)
+			return loadSessionsNamed(ctx, opts, names)
 		},
+		Rename:      renameSession(names),
 		Commands:    func() []Command { return globalCommands(opts) },
 		ToggleLive:  toggleLive(opts),
 		Jump:        termjump.New().Jump,

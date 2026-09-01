@@ -38,6 +38,70 @@ cd agent-sessions
 go build -o ~/.local/bin/agent-sessions .
 ```
 
+## The attention pet
+
+A creature that floats over every app and says whether a session wants you.
+
+```sh
+make pet                            # build it
+scripts/agent-pet                   # start it, or stop it if it is running
+```
+
+```
+  ╭─ Draft Fortellis email response   ✓ ─╮   green, fades after 8s
+  ╰─ Ready ──────────────────────────────╯
+
+  ╭─ api                              ! ─╮   orange, stays until you deal with it
+  ╰─ Input needed ───────────────────────╯
+
+     ╭─────╮
+     │ >_< │  ← one pill per session, stacked over its head
+     ╰─────╯
+```
+
+| Face | Means |
+| --- | --- |
+| `>_<` | a session wants you — orange, bouncing, count on the badge |
+| `o_o` | working |
+| `-_-` | idle |
+| `^_^` | one just finished |
+| `...` | nothing running |
+| `zZ` | snoozed, with the time left on the badge |
+| `x_x` | no feed — is `agent-sessions` on `PATH`? |
+
+**On a pill:** single-click opens its summary (agent, branch, directory), double-click
+jumps to that session's terminal pane, right-click dismisses it. A dismissed pill
+stays gone while that session keeps saying the same thing, and comes back when it
+has something new to ask — dismissing means "I have seen this", not "never mention
+this session again".
+
+**On the creature:** click cycles through the sessions waiting, so three clicks
+visit three panes. Right-click snoozes it — 15 minutes, an hour, until 9am, or
+until you say so — moves it to another corner, and holds **Quit**. Snoozing
+silences the pills and greys the creature; the countdown sits on the badge.
+
+The move items are only the two that make sense from where it stands: across, and
+up or down. The pills follow, flipping which side of the creature they sit on and
+which way they stack. A move lasts until the pet restarts — set `corner` in the
+config for a permanent home, since the CLI owns that file and the pet does not
+write to it.
+
+Where it sits, how big it is, which classes raise it and whether it beeps come
+from `[overlay]` in the config file. It reads `agent-sessions watch` for state and
+calls `agent-sessions jump` when clicked, so it knows nothing about any agent's
+on-disk layout — and it owns the feed process, so there is no daemon to install.
+
+macOS attributes Automation consent to the app that asks, so the pet's first jump
+raises its own dialog separately from the terminal's. Allow it once.
+
+Swift 6 and SwiftPM, no Xcode project — the pills use Liquid Glass where the
+system has it and a material where it does not. `make pet-test` runs its suite;
+`make check` deliberately does not, so the Go half still builds on a machine with
+no Swift installed.
+
+`scripts/agent-pet` is what to point a launcher at — [ALFRED.md](ALFRED.md) wires
+it to an Alfred keyword, a hotkey, or a LaunchAgent that starts it at login.
+
 ## Trust boundary
 
 This tool reads state that coding agents write about themselves, and treats every
@@ -81,6 +145,7 @@ keys.
 | `⏎` | preview the last messages |
 | `f` | fork into a new session |
 | `^n` | start a session somewhere |
+| `r` | rename this session |
 | `^p` | actions and commands |
 | `^j` | focus the terminal pane running it |
 | `^h` | only sessions with a process |
@@ -138,12 +203,25 @@ its own registry entry, so the row arrives on the next tick with a real pid, and
 Grouped by what they touch:
 
 ```
+session      rename session, clear custom name
 go to        open in Linear - Ticket ENG-3170, open PR on GitHub,
              open in Fork, open in VS Code
 clipboard    resume command, session id, transcript path, working directory
 danger       kill process, delete session
 picker       toggle --live filter, reload sessions
 ```
+
+**Renaming** (`r`, or `rename session` in the palette)
+
+An agent names a session for you — from its first prompt, or a title it generates
+later. `r` replaces that with your own name, prefilled with what is on screen so
+changing one word costs one word. Empty it to go back to the agent's name.
+
+Your names live in `~/.agent-sessions/names.json`, keyed by agent and session id,
+and are applied over whatever the provider derived — so a rename shows in the
+picker, in `list`, and in the attention pet's notifications. Nothing is written to
+an agent's own state: Claude Code rewrites its session registry at will, and a
+finished session has no registry entry to write to at all.
 
 The palette floats over the list in the same box, so the row being acted on stays
 visible behind it. An action that cannot run says why rather than disappearing —

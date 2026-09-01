@@ -16,8 +16,12 @@ import (
 type Group int
 
 const (
+	// GroupSession changes what the picker knows about a session rather than doing
+	// anything to the session itself. It is drawn first because it acts on the row
+	// under the cursor, which is what the palette was opened against.
+	GroupSession Group = iota
 	// GroupGoTo opens something outside the picker.
-	GroupGoTo Group = iota
+	GroupGoTo
 	// GroupClipboard puts something on the clipboard.
 	GroupClipboard
 	// GroupDanger is destructive or otherwise not freely undone.
@@ -28,11 +32,13 @@ const (
 
 // Groups is every group in drawing order.
 func Groups() []Group {
-	return []Group{GroupGoTo, GroupClipboard, GroupDanger, GroupPicker}
+	return []Group{GroupSession, GroupGoTo, GroupClipboard, GroupDanger, GroupPicker}
 }
 
 func (g Group) String() string {
 	switch g {
+	case GroupSession:
+		return "session"
 	case GroupGoTo:
 		return "go to"
 	case GroupClipboard:

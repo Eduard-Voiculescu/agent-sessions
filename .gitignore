@@ -5,6 +5,7 @@ agent-sessions
 devel/
 journal/
 docs/
+overlay/.build/
 
 .env
 .env.*

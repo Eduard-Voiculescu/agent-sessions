@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/eduardvoiculescu/agent-sessions/internal/label"
 	"github.com/eduardvoiculescu/agent-sessions/internal/provider"
 	"github.com/eduardvoiculescu/agent-sessions/internal/provider/claude"
 	"github.com/eduardvoiculescu/agent-sessions/internal/provider/opencode"
@@ -74,8 +75,41 @@ func registryFor(opts *Options) *provider.Registry {
 }
 
 func loadSessions(ctx context.Context, opts *Options) ([]session.Session, error) {
+	return loadSessionsNamed(ctx, opts, label.Open())
+}
+
+// loadSessionsNamed is loadSessions with the names store injected, so a test can
+// point it at a temporary file. Every path that loads sessions goes through here:
+// a rename that only reached the picker would vanish from list and from watch.
+func loadSessionsNamed(ctx context.Context, opts *Options, names *label.Store) ([]session.Session, error) {
 	sessions, err := registryFor(opts).Sessions(ctx, opts.Limit)
+	applyNames(sessions, names)
 	return FilterOptions(sessions, opts), err
+}
+
+// applyNames overlays the owner's own names. A store that cannot be read is
+// ignored on purpose: the names are a convenience and the sessions are the point,
+// so an unreadable file must not empty the picker.
+func applyNames(sessions []session.Session, names *label.Store) {
+	if names == nil {
+		return
+	}
+	stored, err := names.Names()
+	if err != nil {
+		return
+	}
+	label.Apply(sessions, stored)
+}
+
+// renameSession records a name against a session, or clears it when the name is
+// empty — which is how the picker's emptied prompt takes a custom name off.
+func renameSession(names *label.Store) func(session.Session, string) error {
+	return func(s session.Session, name string) error {
+		if strings.TrimSpace(name) == "" {
+			return names.Clear(s.Key())
+		}
+		return names.Set(s.Key(), name)
+	}
 }
 
 // listStatus mirrors the picker's own precedence: a live registry status first,

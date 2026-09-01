@@ -189,3 +189,48 @@ func ids(sessions []Session) []string {
 	}
 	return out
 }
+
+// A label is a name somebody typed, so it outranks every derived one — including
+// an agent's own generated title, which is the whole point of typing it.
+func TestMergeKeepsALabelAheadOfEveryDerivedName(t *testing.T) {
+	history := []Session{{Agent: "claude", ID: "a", Name: "first prompt", Title: "AI title", Label: "mine"}}
+	live := []Session{{Agent: "claude", ID: "a", Live: true, PID: 7, Name: "registry name"}}
+
+	merged := Merge(history, live)
+
+	if len(merged) != 1 {
+		t.Fatalf("Merge() returned %d sessions, want 1", len(merged))
+	}
+	if merged[0].Name != "mine" {
+		t.Errorf("Name = %q, want the label", merged[0].Name)
+	}
+	if merged[0].Label != "mine" {
+		t.Errorf("Label = %q, want it carried through", merged[0].Label)
+	}
+}
+
+// A session renamed before it had a transcript exists only in the live set, so
+// the label arrives on that side and must survive the merge just the same.
+func TestMergeTakesALabelFromTheLiveRecordToo(t *testing.T) {
+	history := []Session{{Agent: "claude", ID: "a", Name: "first prompt", Title: "AI title"}}
+	live := []Session{{Agent: "claude", ID: "a", Live: true, PID: 7, Name: "registry name", Label: "mine"}}
+
+	merged := Merge(history, live)
+
+	if merged[0].Name != "mine" || merged[0].Label != "mine" {
+		t.Errorf("Name = %q Label = %q, want the live label to win", merged[0].Name, merged[0].Label)
+	}
+}
+
+// Without a label the existing chain is untouched: an agent's title still beats
+// the name its registry publishes.
+func TestMergeWithNoLabelStillPrefersTheTitle(t *testing.T) {
+	history := []Session{{Agent: "claude", ID: "a", Name: "first prompt", Title: "AI title"}}
+	live := []Session{{Agent: "claude", ID: "a", Live: true, PID: 7, Name: "registry name"}}
+
+	merged := Merge(history, live)
+
+	if merged[0].Name != "AI title" {
+		t.Errorf("Name = %q, want the title", merged[0].Name)
+	}
+}

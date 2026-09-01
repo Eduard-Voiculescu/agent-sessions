@@ -13,11 +13,13 @@ import (
 
 	"github.com/eduardvoiculescu/agent-sessions/internal/action"
 	"github.com/eduardvoiculescu/agent-sessions/internal/config"
+	"github.com/eduardvoiculescu/agent-sessions/internal/label"
 	"github.com/eduardvoiculescu/agent-sessions/internal/provider"
 	"github.com/eduardvoiculescu/agent-sessions/internal/provider/claude"
 	"github.com/eduardvoiculescu/agent-sessions/internal/provider/opencode"
 	"github.com/eduardvoiculescu/agent-sessions/internal/session"
 	"github.com/eduardvoiculescu/agent-sessions/internal/ui"
+	"path/filepath"
 )
 
 func TestRootCommandFlags(t *testing.T) {
@@ -1073,5 +1075,101 @@ func TestApplyConfigRejectsAnUnknownCorner(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
+	}
+}
+
+func TestPickerConfigWiresRenaming(t *testing.T) {
+	dir := t.TempDir()
+	registry := provider.NewRegistry(claude.New(dir))
+	names := label.New(filepath.Join(dir, "names.json"))
+
+	cfg := pickerConfigWith(context.Background(), &Options{ClaudeDir: dir, Limit: 10}, nil, nil, registry, names)
+	if cfg.Rename == nil {
+		t.Fatal("Config.Rename is nil, want renaming wired")
+	}
+
+	target := session.Session{Agent: "claude", ID: "abc123", Name: "derived"}
+	if err := cfg.Rename(target, "mine"); err != nil {
+		t.Fatalf("Rename() error = %v", err)
+	}
+
+	stored, err := names.Names()
+	if err != nil {
+		t.Fatalf("Names() error = %v", err)
+	}
+	if stored[target.Key()] != "mine" {
+		t.Errorf("stored = %v, want the name against the session's key", stored)
+	}
+}
+
+// An emptied name is how a rename takes the custom name off again.
+func TestRenameWithAnEmptyNameClearsIt(t *testing.T) {
+	dir := t.TempDir()
+	names := label.New(filepath.Join(dir, "names.json"))
+	target := session.Session{Agent: "claude", ID: "abc123"}
+	if err := names.Set(target.Key(), "mine"); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := pickerConfigWith(context.Background(), &Options{ClaudeDir: dir, Limit: 10}, nil, nil,
+		provider.NewRegistry(claude.New(dir)), names)
+	if err := cfg.Rename(target, ""); err != nil {
+		t.Fatalf("Rename() error = %v", err)
+	}
+
+	stored, _ := names.Names()
+	if _, found := stored[target.Key()]; found {
+		t.Errorf("stored = %v, want the name cleared", stored)
+	}
+}
+
+func TestRenameRefusesANameThatWouldNotDrawAsOne(t *testing.T) {
+	dir := t.TempDir()
+	names := label.New(filepath.Join(dir, "names.json"))
+	cfg := pickerConfigWith(context.Background(), &Options{ClaudeDir: dir, Limit: 10}, nil, nil,
+		provider.NewRegistry(claude.New(dir)), names)
+
+	err := cfg.Rename(session.Session{Agent: "claude", ID: "abc123"}, "boom\x1b[2J")
+	if err == nil {
+		t.Fatal("Rename() error = nil, want a refusal")
+	}
+}
+
+// Every path that loads sessions has to apply the names, or a rename would show
+// in the picker and vanish from `list`.
+func TestLoadSessionsAppliesCustomNames(t *testing.T) {
+	dir := t.TempDir()
+	projects := filepath.Join(dir, "projects", "-tmp-repo")
+	if err := os.MkdirAll(projects, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"type":"user","sessionId":"named","cwd":"/tmp/repo","message":{"role":"user","content":"the first prompt"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(projects, "named.jsonl"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	names := label.New(filepath.Join(dir, "names.json"))
+	if err := names.Set(session.Key{Agent: "claude", ID: "named"}, "what I call it"); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := &Options{ClaudeDir: dir, Limit: 10}
+	sessions, err := loadSessionsNamed(context.Background(), opts, names)
+	if err != nil {
+		t.Fatalf("loadSessions() error = %v", err)
+	}
+
+	var found bool
+	for _, s := range sessions {
+		if s.ID != "named" {
+			continue
+		}
+		found = true
+		if s.Name != "what I call it" || s.Label != "what I call it" {
+			t.Errorf("session = %+v, want the custom name on Name and Label", s)
+		}
+	}
+	if !found {
+		t.Fatalf("the named session was not loaded at all: %+v", sessions)
 	}
 }

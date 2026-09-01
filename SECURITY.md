@@ -37,6 +37,14 @@ is treated as hostile:
 - Transcripts are opened with `O_NOFOLLOW`, so a symlink planted among them is
   not read.
 
+The one file this tool writes for itself is `~/.agent-sessions/names.json`, the
+names an owner gave their sessions. It is written through a temporary file in the
+same directory and renamed over the old one, so an interrupted write leaves the
+previous names readable, and it is mode 0600. A name is refused at the point it is
+typed if it is empty, longer than 120 characters, or contains a control character
+— it is read back onto a terminal, so what a terminal reads as a command must
+never reach the file in the first place.
+
 **If you add a provider, this applies to it.** Return values through
 `internal/untrusted` and build argv through `untrusted.ArgValue`.
 

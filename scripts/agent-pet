@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Start or stop the attention pet, for a launcher rather than a shell.
+#
+# Alfred, LaunchAgents and Raycast all run scripts with the minimal PATH launchd
+# hands them — /usr/bin:/bin:/usr/sbin:/sbin — and the pet resolves the CLI it
+# reads through /usr/bin/env. Widening PATH here is what keeps it from starting up
+# blind and showing a dead-feed face with nothing to explain it.
+set -uo pipefail
+
+readonly log="${HOME}/Library/Logs/agent-pet.log"
+
+# Appended, never prepended: these are fallbacks for a launcher's bare PATH, and
+# putting them first would shadow whatever CLI the caller deliberately chose.
+export PATH="${PATH}:${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin"
+
+# The binary sits in the checkout this script was run from, found by following
+# the script's own path: a launcher's working directory is its own, never yours.
+resolve_repo() {
+	local source="${BASH_SOURCE[0]}"
+	while [ -L "${source}" ]; do
+		source="$(readlink "${source}")"
+	done
+	cd -- "$(dirname -- "${source}")/.." && pwd
+}
+
+readonly repo="$(resolve_repo)"
+readonly pet="${repo}/overlay/.build/release/AgentPet"
+
+if pgrep -x AgentPet >/dev/null 2>&1; then
+	pkill -x AgentPet
+	echo "attention pet stopped"
+	exit 0
+fi
+
+if [ ! -x "${pet}" ]; then
+	echo "not built yet — run: make pet"
+	exit 1
+fi
+
+if ! command -v agent-sessions >/dev/null 2>&1; then
+	echo "agent-sessions is not on PATH — run: make build"
+	exit 1
+fi
+
+# A CLI without the feed is the failure worth catching here: the pet would start,
+# find no `watch`, and show x_x in a corner with no way to ask it why.
+if ! agent-sessions watch --help >/dev/null 2>&1; then
+	echo "this agent-sessions has no watch command — run: make build"
+	exit 1
+fi
+
+nohup "${pet}" >>"${log}" 2>&1 &
+disown
+echo "attention pet started"

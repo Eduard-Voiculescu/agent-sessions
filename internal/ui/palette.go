@@ -29,9 +29,24 @@ type entry struct {
 	blank   bool
 	act     action.Action
 	command *Command
+	// prompt marks an entry that opens a mode instead of running something: the
+	// palette closes and the picker asks for a value. An action cannot do this —
+	// action.Run is handed a session and expected to finish on its own.
+	prompt prompt
 }
 
-func (e entry) runnable() bool { return e.act != nil || e.command != nil }
+// prompt is which question a palette entry opens.
+type prompt int
+
+const (
+	promptNone prompt = iota
+	promptRename
+	promptClearName
+)
+
+func (e entry) runnable() bool {
+	return e.act != nil || e.command != nil || e.prompt != promptNone
+}
 
 func (m model) openPalette() model {
 	rows := m.visible()
@@ -67,6 +82,22 @@ func (m model) buildPaletteEntries() []entry {
 	if m.actions != nil {
 		for _, a := range m.actions(m.paletteTarget) {
 			runnable = append(runnable, entry{label: a.Label(m.paletteTarget), group: a.Group(), act: a})
+		}
+	}
+	if m.rename != nil {
+		runnable = append(runnable, entry{
+			label:  "rename session",
+			group:  action.GroupSession,
+			prompt: promptRename,
+		})
+		// Only worth offering against a session that has one: an entry that would
+		// clear nothing reads as an entry that failed to do anything.
+		if m.paletteTarget.Label != "" {
+			runnable = append(runnable, entry{
+				label:  "clear custom name",
+				group:  action.GroupSession,
+				prompt: promptClearName,
+			})
 		}
 	}
 	if m.commands != nil {
@@ -283,6 +314,19 @@ func (m model) paletteWindowStart(total int) int {
 }
 
 func (m model) launch(e entry) (tea.Model, tea.Cmd) {
+	switch e.prompt {
+	case promptRename:
+		target := m.paletteTarget
+		m = m.closePalette()
+		return m.startRename(target), nil
+	case promptClearName:
+		target := m.paletteTarget
+		m = m.closePalette()
+		m.renameTarget = target
+		m.renameText = ""
+		return m.commitRename()
+	}
+
 	if e.act != nil {
 		if prompt := e.act.Confirm(m.paletteTarget); prompt != "" {
 			m.palette = false

@@ -41,7 +41,12 @@ const (
 	wordmarkGlyphBottom = "█▀█ ▀▀█"
 	wordmarkGap         = "   "
 
-	keyHints = "⏎ preview  ^n new  ^p actions  ^j jump  ^h live  / filter  ? help  q quit"
+	// keyHints is the footer's full list; keyHintsCore is what survives a terminal
+	// too narrow for it. Two strings rather than one truncated: cutting the full
+	// list drops whatever is last, and "q quit" is the hint somebody stuck in a
+	// full-screen program needs most.
+	keyHints     = "⏎ preview  ^n new  r rename  ^p actions  ^j jump  ^h live  / filter  ? help  q quit"
+	keyHintsCore = "⏎ preview  ^p actions  ^j jump  ^h live  / filter  ? help  q quit"
 )
 
 // wordmarkGlyphWidth is the "AS" glyph's own width in cells, both rows being
@@ -105,6 +110,10 @@ type Config struct {
 	// provider, and the event loop cannot wait on a subprocess that may be
 	// blocked on a human.
 	Start func(ctx context.Context, agent, dir string) error
+	// Rename records the name an owner gave a session, or clears it when the name
+	// is empty. A closure because the store is the command layer's to own, and
+	// this package draws rows rather than deciding where a name is kept.
+	Rename func(s session.Session, name string) error
 	// Preview reads the last messages of a session's transcript, for Enter to
 	// show before resuming. It runs as a tea.Cmd, not inline: like Jump, it does
 	// I/O that must not block rendering, the tick or ctrl+c.
@@ -170,6 +179,10 @@ type model struct {
 	previewGen    int
 	composing     bool
 	composeText   string
+	renaming      bool
+	renameText    string
+	renameTarget  session.Session
+	rename        func(session.Session, string) error
 	starting      bool
 	startStep     startStep
 	startAgents   []string
@@ -240,6 +253,7 @@ func newModel(cfg Config) model {
 		jump:           cfg.Jump,
 		send:           cfg.Send,
 		preview:        cfg.Preview,
+		rename:         cfg.Rename,
 		startAgents:    cfg.StartAgents,
 		start:          cfg.Start,
 		liveOnly:       cfg.LiveOnly,
@@ -323,13 +337,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// ctrl+p is intercepted before the mode dispatch like ctrl+c, so the row
 		// filter cannot swallow it.
-		if msg.Type == tea.KeyCtrlP && !m.palette && !m.confirming && !m.previewing && !m.composing {
+		if msg.Type == tea.KeyCtrlP && !m.palette && !m.confirming && !m.previewing && !m.composing && !m.renaming {
 			return m.openPalette(), nil
 		}
 		// ctrl+n is intercepted here for the same reason ctrl+p is — the row
 		// filter would otherwise swallow it — but never over a mode that owns the
 		// keyboard, where an n is text somebody is typing.
-		if msg.Type == tea.KeyCtrlN && !m.palette && !m.confirming && !m.previewing && !m.composing && !m.starting {
+		if msg.Type == tea.KeyCtrlN && !m.palette && !m.confirming && !m.previewing && !m.composing && !m.starting && !m.renaming {
 			return m.openStart(), nil
 		}
 		if m.palette {
@@ -340,6 +354,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.composing {
 			return m.updateComposing(msg)
+		}
+		if m.renaming {
+			return m.updateRenaming(msg)
 		}
 		if m.starting {
 			return m.updateStarting(msg)
@@ -453,6 +470,12 @@ func (m model) updateBrowsing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "ctrl+h":
 		return m.toggleLiveFilter()
+
+	case "r":
+		if m.cursor < len(rows) {
+			return m.startRename(rows[m.cursor]), nil
+		}
+		return m, nil
 
 	case "?":
 		m.help = !m.help
@@ -729,6 +752,8 @@ func (m model) footerLine() string {
 	// already carrying lipgloss's own styling must never be filtered.
 	case m.confirming:
 		return gutter(fmt.Sprintf("%s [y/N] ", untrusted.Text(m.confirmPrompt)), m.width)
+	case m.renaming:
+		return m.renameLine()
 	case m.filtering:
 		return gutter(fmt.Sprintf("filter: %s_", untrusted.Text(m.query)), m.width)
 	case m.status != "":
@@ -740,8 +765,18 @@ func (m model) footerLine() string {
 		if detail := m.cursorDetail(); detail != "" {
 			return dimStyle.Render(gutter("◆ "+detail, m.width))
 		}
-		return dimStyle.Render(gutter(keyHints, m.width))
+		return dimStyle.Render(gutter(hintsFor(m.width), m.width))
 	}
+}
+
+// hintsFor picks the widest list that fits. It measures rather than counts
+// columns, so a hint added to either string cannot silently push the last one off
+// the end — which is what a test at eighty columns caught it doing.
+func hintsFor(width int) string {
+	if width <= 0 || lipgloss.Width(keyHints) <= span(width) {
+		return keyHints
+	}
+	return keyHintsCore
 }
 
 // cursorDetail is the progress line of the row under the cursor, or "" for a

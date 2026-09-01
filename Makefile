@@ -17,6 +17,17 @@ build:
 run:
 	$(GO) run . $(ARGS)
 
+# The pet is a separate toolchain: SwiftPM, no Xcode project. It is deliberately
+# not part of `check`, which must keep working on a machine with no Swift.
+.PHONY: pet
+pet:
+	swift build -c release --package-path overlay
+	@echo "built overlay/.build/release/AgentPet"
+
+.PHONY: pet-test
+pet-test:
+	swift test --package-path overlay
+
 .PHONY: fmt
 fmt:
 	gofmt -w .

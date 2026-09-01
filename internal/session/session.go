@@ -9,11 +9,16 @@ import (
 )
 
 type Session struct {
-	Agent      string    `json:"agent"`
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Title      string    `json:"title,omitempty"`
-	Cwd        string    `json:"cwd"`
+	Agent string `json:"agent"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Title string `json:"title,omitempty"`
+	Cwd   string `json:"cwd"`
+	// Label is a name the owner gave this session. It outranks every derived name,
+	// including an agent's own generated title: a name somebody typed is the only
+	// one they chose. Empty means nobody has renamed this session, which is the
+	// common case and falls back to whatever the agent calls it.
+	Label      string    `json:"label,omitempty"`
 	GitBranch  string    `json:"gitBranch,omitempty"`
 	Transcript string    `json:"transcript,omitempty"`
 	Live       bool      `json:"live"`
@@ -79,10 +84,18 @@ func Merge(history, live []Session) []Session {
 		s.PID = l.PID
 		s.Status = l.Status
 		s.StartedAt = l.StartedAt
+		// A label arrives on whichever side was loaded when the rename was made:
+		// history for a session with a transcript, live for one renamed before it
+		// had written one.
+		//
 		// Title is kept apart from Name so it can be promoted here without
 		// disturbing a Name that fell back to a cleaned prompt or a short id —
 		// only an actual ai-title should ever outrank the live registry's name.
-		s.Name = cmp.Or(s.Title, l.Name, s.Name)
+		if label := cmp.Or(s.Label, l.Label); label != "" {
+			s.Label, s.Name = label, label
+		} else {
+			s.Name = cmp.Or(s.Title, l.Name, s.Name)
+		}
 		s.Cwd = cmp.Or(l.Cwd, s.Cwd)
 		if l.LastActive.After(s.LastActive) {
 			s.LastActive = l.LastActive
