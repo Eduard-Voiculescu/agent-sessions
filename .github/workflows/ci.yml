@@ -36,8 +36,15 @@ jobs:
 
       # A called vulnerability fails the build. Advisories for code that is never
       # reached are reported by govulncheck without a non-zero exit.
+      #
+      # Pinned rather than @latest: govulncheck raises its own Go floor between
+      # releases, and setup-go pins the toolchain to go.mod with GOTOOLCHAIN=local,
+      # so @latest fails to build the day it outruns this module's Go version
+      # rather than the day a vulnerability appears. The advisory database is
+      # fetched at run time, so the pin dates the scanner, never its data. Raise it
+      # alongside the go directive.
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
   test:
     runs-on: macos-latest
