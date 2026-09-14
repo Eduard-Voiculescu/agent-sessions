@@ -22,8 +22,11 @@ final class StackWindow: NSWindow {
     // ask a question would be worse than no notification at all.
     override var canBecomeKey: Bool { false }
 
-    func place(pet: NSRect, corner: Corner, pills: Int, expanded: Bool) {
-        let visible = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+    /// screen is the creature's own, not `NSScreen.main`: main is wherever the
+    /// keyboard focus is, so on a second display the pills would be clamped into
+    /// the screen the human is typing on while the pet stands on the other one.
+    func place(pet: NSRect, corner: Corner, pills: Int, expanded: Bool, screen: NSScreen?) {
+        let visible = (screen ?? NSScreen.main)?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
         setFrame(
             StackLayout.frame(pet: pet, corner: corner, pills: pills, expanded: expanded, in: visible),
             display: true

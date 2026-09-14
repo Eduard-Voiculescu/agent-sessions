@@ -76,7 +76,9 @@ has something new to ask — dismissing means "I have seen this", not "never men
 this session again".
 
 **On the creature:** click cycles through the sessions waiting, so three clicks
-visit three panes. Right-click snoozes it — 15 minutes, an hour, until 9am, or
+visit three panes. Double-click goes to the picker itself, which is the useful
+move when nothing is waiting and a single click has nothing to cycle; with no
+picker open it does nothing. Right-click snoozes it — 15 minutes, an hour, until 9am, or
 until you say so — moves it to another corner, and holds **Quit**. Snoozing
 silences the pills and greys the creature; the countdown sits on the badge.
 
@@ -235,6 +237,7 @@ agent-sessions list                 # the table, no TUI
 agent-sessions list --json          # for scripts
 agent-sessions watch                # one JSON line per tick, for anything watching
 agent-sessions jump --pid 51234      # focus the pane running a session
+agent-sessions jump --picker        # focus the pane running the picker itself
 agent-sessions config               # what was configured, and where from
 agent-sessions config --json        # the same, resolved, for a program
 agent-sessions purge --dry-run      # what deleting sessions left behind

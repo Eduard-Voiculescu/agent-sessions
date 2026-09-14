@@ -9,6 +9,7 @@ import SwiftUI
 struct PetSpriteView: View {
     let mood: Mood
     let onTap: () -> Void
+    let onDoubleTap: () -> Void
 
     var body: some View {
         background
@@ -20,6 +21,10 @@ struct PetSpriteView: View {
             .scaleEffect(bounce ? 1.06 : 1)
             .animation(animation, value: bounce)
             .contentShape(Rectangle())
+            // The double-tap is declared first because SwiftUI matches gestures in
+            // the order they are attached: with the single first, it wins every
+            // time and the second click never arrives.
+            .onTapGesture(count: 2, perform: onDoubleTap)
             .onTapGesture(perform: onTap)
             .help(mood.tooltip(attention: 0, snoozeLabel: nil))
     }
@@ -42,6 +47,7 @@ struct PetBadgeView: View {
     let text: String
     let snoozed: Bool
     let onTap: () -> Void
+    let onDoubleTap: () -> Void
 
     var body: some View {
         Text(text)
@@ -57,6 +63,11 @@ struct PetBadgeView: View {
                     .shadow(color: .black.opacity(0.35), radius: 1.5, y: 0.5)
             )
             .contentShape(Capsule(style: .continuous))
+            // The badge covers the corner of the creature it straddles, so it has
+            // to answer a double click the same way: otherwise the one gesture
+            // means two different things depending on how many sessions are
+            // waiting, which is exactly when the badge appears.
+            .onTapGesture(count: 2, perform: onDoubleTap)
             .onTapGesture(perform: onTap)
     }
 

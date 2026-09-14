@@ -10,13 +10,14 @@ import (
 type jumpOptions struct {
 	pid     int
 	session string
+	picker  bool
 }
 
 // newJumpCommand exposes the picker's ctrl+j as a command, so something outside
 // a terminal — the attention pet — can put a session's pane in front without
-// learning AppleScript. jump is a parameter so the suite drives it without
-// osascript, the way pickerConfig's tests already do.
-func newJumpCommand(opts *Options, jump func(context.Context, int) error) *cobra.Command {
+// learning AppleScript. jump and picker are parameters so the suite drives them
+// without osascript or a process listing, the way pickerConfig's tests already do.
+func newJumpCommand(opts *Options, jump func(context.Context, int) error, picker func(context.Context) (int, error)) *cobra.Command {
 	var jumpOpts jumpOptions
 
 	cmd := &cobra.Command{
@@ -25,25 +26,39 @@ func newJumpCommand(opts *Options, jump func(context.Context, int) error) *cobra
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runJump(cmd, opts, jumpOpts, jump)
+			return runJump(cmd, opts, jumpOpts, jump, picker)
 		},
 	}
 	cmd.Flags().IntVar(&jumpOpts.pid, "pid", 0, "pid of the process to focus")
 	cmd.Flags().StringVar(&jumpOpts.session, "session", "", "session id to focus, resolved to its pid")
+	cmd.Flags().BoolVar(&jumpOpts.picker, "picker", false, "focus the terminal pane running the picker itself")
 
 	return cmd
 }
 
-func runJump(cmd *cobra.Command, opts *Options, jumpOpts jumpOptions, jump func(context.Context, int) error) error {
+func runJump(cmd *cobra.Command, opts *Options, jumpOpts jumpOptions, jump func(context.Context, int) error, picker func(context.Context) (int, error)) error {
+	aimed := 0
+	for _, given := range []bool{jumpOpts.pid != 0, jumpOpts.session != "", jumpOpts.picker} {
+		if given {
+			aimed++
+		}
+	}
 	switch {
-	case jumpOpts.pid != 0 && jumpOpts.session != "":
-		return fmt.Errorf("pass one of --pid or --session, not both")
-	case jumpOpts.pid == 0 && jumpOpts.session == "":
-		return fmt.Errorf("pass --pid <n> or --session <id>")
+	case aimed > 1:
+		return fmt.Errorf("pass one of --pid, --session or --picker, not several")
+	case aimed == 0:
+		return fmt.Errorf("pass --pid <n>, --session <id> or --picker")
 	}
 
 	ctx := cmd.Context()
 	pid := jumpOpts.pid
+	if jumpOpts.picker {
+		found, err := picker(ctx)
+		if err != nil {
+			return err
+		}
+		pid = found
+	}
 	if jumpOpts.session != "" {
 		resolved, err := livePID(ctx, opts, jumpOpts.session)
 		if err != nil {

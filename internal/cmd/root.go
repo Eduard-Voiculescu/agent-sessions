@@ -103,7 +103,7 @@ func newRootCommand(opts *Options, run runners) *cobra.Command {
 	root.AddCommand(newConfigCommand(opts))
 	root.AddCommand(newPurgeCommand(opts))
 	root.AddCommand(newWatchCommand(opts))
-	root.AddCommand(newJumpCommand(opts, termjump.New().Jump))
+	root.AddCommand(newJumpCommand(opts, termjump.New().Jump, PickerPID))
 
 	return root
 }

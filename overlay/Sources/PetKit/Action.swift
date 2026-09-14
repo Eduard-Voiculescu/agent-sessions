@@ -41,4 +41,16 @@ public enum Action {
     public static func jump(pid: Int, binary: String = "agent-sessions") -> Bool {
         Shell.run(binary, ["jump", "--pid", String(pid)]) != nil
     }
+
+    /// picker puts the agent-sessions picker itself in front — the one place from
+    /// which every session is reachable.
+    ///
+    /// Which process that is, is the CLI's question to answer: the pet's own feed
+    /// child is an agent-sessions process too, so a search from here would find
+    /// it and jump at something with no pane. False means none is running, which
+    /// the caller is free to treat as nothing to do.
+    @discardableResult
+    public static func picker(binary: String = "agent-sessions") -> Bool {
+        Shell.run(binary, ["jump", "--picker"]) != nil
+    }
 }

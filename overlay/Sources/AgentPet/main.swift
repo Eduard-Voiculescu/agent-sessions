@@ -30,7 +30,8 @@ final class MenuHost: NSView {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: PetWindow!
     private var host: MenuHost!
-    private var stack: StackWindow!
+    /// Optional and short-lived on purpose: see renderStack.
+    private var stack: StackWindow?
     private var feed: Feed!
     private var engine: MoodEngine!
     private var settings = Settings.fallback
@@ -52,7 +53,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings = Settings.load()
         engine = MoodEngine(raise: settings.raise)
         window = PetWindow(settings: settings)
-        stack = StackWindow()
 
         host = MenuHost(frame: .zero)
         host.buildMenu = { [weak self] in self?.menu() ?? NSMenu() }
@@ -133,7 +133,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         host.frame = NSRect(origin: .zero, size: window.frame.size)
         host.subviews.forEach { $0.removeFromSuperview() }
 
-        let sprite = NSHostingView(rootView: PetSpriteView(mood: mood) { [weak self] in self?.clicked() })
+        let sprite = NSHostingView(rootView: PetSpriteView(
+            mood: mood,
+            onTap: { [weak self] in self?.clicked() },
+            onDoubleTap: { [weak self] in self?.doubleClicked() }
+        ))
         sprite.frame = window.spriteBounds
 
         // The rounding lives on the layer rather than in the SwiftUI shape: a
@@ -154,8 +158,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let width = PetBadgeView.width(for: text, height: height)
             let badge = NSHostingView(rootView: PetBadgeView(
                 text: text,
-                snoozed: mood == .snoozed
-            ) { [weak self] in self?.clicked() })
+                snoozed: mood == .snoozed,
+                onTap: { [weak self] in self?.clicked() },
+                onDoubleTap: { [weak self] in self?.doubleClicked() }
+            ))
 
             // Centred on the sprite's top-right corner, so it sits half on and half
             // off the creature the way an app icon's badge does.
@@ -188,11 +194,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return waiting > 1 ? "\(waiting)" : nil
     }
 
+    /// renderStack builds a new window for each run of pills rather than hiding one
+    /// and showing it again.
+    ///
+    /// A window kept around between bursts loses its Space: after a day of being
+    /// ordered out and back in, `isVisible` reports true, the frame is right, and
+    /// `isOnActiveSpace` is false — so the pills draw somewhere nobody is looking
+    /// and no amount of ordering front brings them back. Only a fresh window is
+    /// born into the Space the human is actually on.
     private func renderStack() {
         guard !notifications.isEmpty else {
-            stack.orderOut(nil)
+            stack?.orderOut(nil)
+            stack = nil
             return
         }
+
+        let stack = self.stack ?? StackWindow()
+        self.stack = stack
 
         let shown = Array(notifications.prefix(StackLayout.maxPills))
         let view = StackView(
@@ -209,7 +227,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pet: window.spriteFrame,
             corner: settings.corner,
             pills: notifications.count,
-            expanded: expandedID != nil
+            expanded: expandedID != nil,
+            screen: window.screen
         )
         stack.orderFrontRegardless()
     }
@@ -237,6 +256,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let target = attention[cycled % attention.count]
         cycled += 1
         jump(pid: target.pid)
+    }
+
+    /// doubleClicked goes to the picker rather than to a session, in every mood
+    /// and on both the creature and its badge: single click cycles what is
+    /// waiting, and this one gesture has to mean the same thing whatever the
+    /// agents happen to be doing.
+    private func doubleClicked() {
+        if !Action.picker() {
+            FileHandle.standardError.write(Data("agent-pet: no agent-sessions picker to jump to\n".utf8))
+        }
     }
 
     private func jump(pid: Int?) {
