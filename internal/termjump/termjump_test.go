@@ -371,3 +371,71 @@ func TestSendReportsPaneFailures(t *testing.T) {
 		})
 	}
 }
+
+// A development build of iTerm2 shares the release's bundle id, so addressing
+// the app by name can land on an instance with no windows while the pane is
+// open in the other one.
+func TestJumpFindsThePaneInWhicheverITerm2InstanceHoldsIt(t *testing.T) {
+	const release, development = "/Applications/iTerm.app", "/tmp/Build/iTerm2.app"
+	var tried []string
+	j := termjump.New(
+		termjump.WithTTYFunc(func(context.Context, int) (string, error) { return "ttys002", nil }),
+		termjump.WithAppsFunc(func(context.Context) ([]string, error) { return []string{development, release}, nil }),
+		termjump.WithRunFunc(func(_ context.Context, script string) (string, error) {
+			if strings.Contains(script, `application "`+development+`"`) {
+				tried = append(tried, development)
+				return "NO_WINDOWS", nil
+			}
+			tried = append(tried, release)
+			return "FOUND", nil
+		}),
+	)
+
+	if err := j.Jump(context.Background(), 42); err != nil {
+		t.Fatalf("Jump() error = %v, want nil", err)
+	}
+	if len(tried) != 2 || tried[1] != release {
+		t.Errorf("instances tried = %v, want the development build then the release", tried)
+	}
+}
+
+func TestJumpReportsTheMostTellingMissAcrossInstances(t *testing.T) {
+	replies := map[string]string{"/a/iTerm2.app": "NOT_FOUND", "/b/iTerm2.app": "NO_WINDOWS"}
+	j := termjump.New(
+		termjump.WithTTYFunc(func(context.Context, int) (string, error) { return "ttys002", nil }),
+		termjump.WithAppsFunc(func(context.Context) ([]string, error) { return []string{"/a/iTerm2.app", "/b/iTerm2.app"}, nil }),
+		termjump.WithRunFunc(func(_ context.Context, script string) (string, error) {
+			for app, reply := range replies {
+				if strings.Contains(script, `"`+app+`"`) {
+					return reply, nil
+				}
+			}
+			return "", errors.New("script addressed no known instance")
+		}),
+	)
+
+	err := j.Jump(context.Background(), 42)
+	if err == nil || !strings.Contains(err.Error(), "no iTerm2 pane found") {
+		t.Errorf("Jump() error = %v, want the NOT_FOUND miss over NO_WINDOWS", err)
+	}
+}
+
+func TestJumpFallsBackToTheAppNameWhenNoInstanceIsListed(t *testing.T) {
+	var gotScript string
+	j := termjump.New(
+		termjump.WithTTYFunc(func(context.Context, int) (string, error) { return "ttys002", nil }),
+		termjump.WithAppsFunc(func(context.Context) ([]string, error) { return nil, nil }),
+		termjump.WithRunFunc(func(_ context.Context, script string) (string, error) {
+			gotScript = script
+			return "NOT_RUNNING", nil
+		}),
+	)
+
+	err := j.Jump(context.Background(), 42)
+	if err == nil || !strings.Contains(err.Error(), "not running") {
+		t.Errorf("Jump() error = %v, want iTerm2 is not running", err)
+	}
+	if !strings.Contains(gotScript, `application "iTerm2"`) {
+		t.Errorf("script does not address iTerm2 by name:\n%s", gotScript)
+	}
+}

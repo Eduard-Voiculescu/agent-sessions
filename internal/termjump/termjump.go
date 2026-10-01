@@ -38,12 +38,17 @@ const paneTimeout = 10 * time.Second
 // broken ps call so the caller can be told which happened.
 var errProcessGone = errors.New("process is gone")
 
-// Jumper switches iTerm2's focus to the pane running a given pid. Both side
+// iTermExecutable is the tail every iTerm2 build's main executable path ends
+// in, whatever the bundle is named or wherever it was built.
+const iTermExecutable = ".app/Contents/MacOS/iTerm2"
+
+// Jumper switches iTerm2's focus to the pane running a given pid. Its side
 // effects are injected so a test can drive Jump without spawning ps or
 // osascript, and without moving the caller's own focus.
 type Jumper struct {
-	tty func(ctx context.Context, pid int) (string, error)
-	run func(ctx context.Context, script string) (string, error)
+	tty  func(ctx context.Context, pid int) (string, error)
+	apps func(ctx context.Context) ([]string, error)
+	run  func(ctx context.Context, script string) (string, error)
 }
 
 // Option configures a Jumper built by New.
@@ -55,6 +60,12 @@ func WithTTYFunc(fn func(context.Context, int) (string, error)) Option {
 	return func(j *Jumper) { j.tty = fn }
 }
 
+// WithAppsFunc overrides how the running iTerm2 bundles are listed. The
+// default reads them out of `ps -axo comm=`.
+func WithAppsFunc(fn func(context.Context) ([]string, error)) Option {
+	return func(j *Jumper) { j.apps = fn }
+}
+
 // WithRunFunc overrides how the generated AppleScript is executed. The
 // default runs it through osascript.
 func WithRunFunc(fn func(context.Context, string) (string, error)) Option {
@@ -63,7 +74,7 @@ func WithRunFunc(fn func(context.Context, string) (string, error)) Option {
 
 // New builds a Jumper against the real ps and osascript, unless overridden.
 func New(opts ...Option) *Jumper {
-	j := &Jumper{tty: defaultTTY, run: defaultRun}
+	j := &Jumper{tty: defaultTTY, apps: defaultApps, run: defaultRun}
 	for _, opt := range opts {
 		opt(j)
 	}
@@ -94,7 +105,7 @@ func (j *Jumper) Send(ctx context.Context, pid int, text string) error {
 	if i := strings.IndexFunc(text, unicode.IsControl); i >= 0 {
 		return fmt.Errorf("message has a control character at byte %d", i)
 	}
-	return j.pane(ctx, pid, "send", func(tty string) string { return sendScript(tty, text) })
+	return j.pane(ctx, pid, "send", func(app, tty string) string { return sendScript(app, tty, text) })
 }
 
 // pane resolves pid's controlling terminal, runs the script built for it, and
@@ -102,7 +113,7 @@ func (j *Jumper) Send(ctx context.Context, pid int, text string) error {
 // subprocesses; paneTimeout caps them even when the caller's context has no
 // deadline of its own. verb names the operation in the errors that are about
 // the operation rather than about the pane.
-func (j *Jumper) pane(ctx context.Context, pid int, verb string, build func(tty string) string) error {
+func (j *Jumper) pane(ctx context.Context, pid int, verb string, build func(app, tty string) string) error {
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("%s needs macOS and iTerm2", verb)
 	}
@@ -126,15 +137,62 @@ func (j *Jumper) pane(ctx context.Context, pid int, verb string, build func(tty 
 	// unprefixed.
 	tty := "/dev/" + raw
 
-	out, err := j.run(ctx, build(tty))
+	return j.eachInstance(ctx, verb,
+		func(app string) string { return build(app, tty) },
+		fmt.Errorf("no iTerm2 pane found for pid %d", pid))
+}
+
+// eachInstance runs the script built for every running iTerm2 until one of
+// them reports FOUND. A development build shares the release's bundle id, so
+// `application "iTerm2"` resolves to whichever one LaunchServices prefers —
+// often a freshly launched build with no windows — and the pane being looked
+// for is in the other. Each instance is therefore addressed by its bundle
+// path, and when none succeeds the most telling miss is the one reported.
+func (j *Jumper) eachInstance(ctx context.Context, verb string, build func(app string) string, notFound error) error {
+	apps, err := j.apps(ctx)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return fmt.Errorf("%s timed out waiting for iTerm2: %w", verb, err)
+			return fmt.Errorf("%s timed out listing iTerm2 instances: %w", verb, err)
 		}
-		return fmt.Errorf("running osascript: %w", err)
+		return fmt.Errorf("listing running iTerm2 instances: %w", err)
+	}
+	if len(apps) == 0 {
+		apps = []string{"iTerm2"}
 	}
 
-	return outcome(out, fmt.Errorf("no iTerm2 pane found for pid %d", pid))
+	miss := notRunningMarker
+	for _, app := range apps {
+		out, err := j.run(ctx, build(app))
+		if err != nil {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return fmt.Errorf("%s timed out waiting for iTerm2: %w", verb, err)
+			}
+			return fmt.Errorf("running osascript: %w", err)
+		}
+		marker := strings.TrimSpace(out)
+		if missRank(marker) < 0 {
+			return outcome(marker, notFound)
+		}
+		if missRank(marker) > missRank(miss) {
+			miss = marker
+		}
+	}
+	return outcome(miss, notFound)
+}
+
+// missRank orders the markers that let the search move on to the next
+// instance by how much they say, and is -1 for every other reply.
+func missRank(marker string) int {
+	switch marker {
+	case notRunningMarker:
+		return 0
+	case noWindowsMarker:
+		return 1
+	case notFoundMarker:
+		return 2
+	default:
+		return -1
+	}
 }
 
 // outcome translates a script's marker back into an error. What NOT_FOUND means
@@ -159,8 +217,8 @@ func outcome(out string, notFound error) error {
 // mean the matching session shares its tab and window with siblings, so all
 // three levels are selected, window first and session last — selecting only
 // the session would leave a stale tab or window in front of it.
-func jumpScript(tty string) string {
-	return paneScript(tty, `select w
+func jumpScript(app, tty string) string {
+	return paneScript(app, tty, `select w
 					select t
 					select s
 					-- A tab remembers its own current session, so selecting a tab after
@@ -173,35 +231,35 @@ func jumpScript(tty string) string {
 // sendScript types text into the matching pane. iTerm2's write command enters
 // the text as though it had been typed and submits it, so no trailing return
 // is added; nothing is selected, so focus stays where the caller left it.
-func sendScript(tty, text string) string {
-	return paneScript(tty, "tell s to write text "+appleScriptString(text))
+func sendScript(app, tty, text string) string {
+	return paneScript(app, tty, "tell s to write text "+appleScriptString(text))
 }
 
 // paneScript walks every window, tab and session looking for the one pane whose
 // tty matches, and runs action on it. A window count of zero is reported apart
 // from a walk that found nothing, since only the latter says the pid's terminal
 // is not iTerm2.
-func paneScript(tty, action string) string {
+func paneScript(app, tty, action string) string {
 	return fmt.Sprintf(`
-if application "iTerm2" is running then
-	tell application "iTerm2"
-		if (count of windows) is 0 then return %q
+if application %[1]s is running then
+	tell application %[1]s
+		if (count of windows) is 0 then return %[2]q
 		repeat with w in windows
 			repeat with t in tabs of w
 				repeat with s in sessions of t
-					if (tty of s) is %s then
-						%s
-						return %q
+					if (tty of s) is %[3]s then
+						%[4]s
+						return %[5]q
 					end if
 				end repeat
 			end repeat
 		end repeat
 	end tell
-	return %q
+	return %[6]q
 else
-	return %q
+	return %[7]q
 end if
-`, noWindowsMarker, appleScriptString(tty), action, foundMarker, notFoundMarker, notRunningMarker)
+`, appleScriptString(app), noWindowsMarker, appleScriptString(tty), action, foundMarker, notFoundMarker, notRunningMarker)
 }
 
 // appleScriptString quotes a value as an AppleScript string literal. Only the
@@ -244,6 +302,23 @@ func psError(err error, out []byte) error {
 		return errProcessGone
 	}
 	return withStderr(err)
+}
+
+// defaultApps lists the bundle path of every running iTerm2. comm is the full
+// executable path on macOS, so a bundle path is what is left once the
+// executable's tail inside the bundle is cut off.
+func defaultApps(ctx context.Context) ([]string, error) {
+	out, err := exec.CommandContext(ctx, "ps", "-axo", "comm=").Output()
+	if err != nil {
+		return nil, withStderr(err)
+	}
+	var apps []string
+	for line := range strings.Lines(string(out)) {
+		if bundle, ok := strings.CutSuffix(strings.TrimSpace(line), iTermExecutable); ok {
+			apps = append(apps, bundle+".app")
+		}
+	}
+	return apps, nil
 }
 
 func defaultRun(ctx context.Context, script string) (string, error) {

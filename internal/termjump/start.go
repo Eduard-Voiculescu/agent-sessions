@@ -32,14 +32,9 @@ func (j *Jumper) Start(ctx context.Context, dir string, argv []string) error {
 	ctx, cancel := context.WithTimeout(ctx, paneTimeout)
 	defer cancel()
 
-	out, err := j.run(ctx, startScript(command))
-	if err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return fmt.Errorf("start timed out waiting for iTerm2: %w", err)
-		}
-		return fmt.Errorf("running osascript: %w", err)
-	}
-	return outcome(out, errors.New("iTerm2 opened no tab to start in"))
+	return j.eachInstance(ctx, "start",
+		func(app string) string { return startScript(app, command) },
+		errors.New("iTerm2 opened no tab to start in"))
 }
 
 // startCommand builds the one shell line the new tab is written. Both the
@@ -98,10 +93,10 @@ func shellQuote(value string) string {
 // startScript creates the tab and writes the command into it. Only two of the
 // four markers can come back: there is no pane to look for, so NOT_FOUND has
 // nothing to report here.
-func startScript(command string) string {
+func startScript(app, command string) string {
 	return fmt.Sprintf(`
-if application "iTerm2" is running then
-	tell application "iTerm2"
+if application %s is running then
+	tell application %[1]s
 		if (count of windows) is 0 then return %q
 		tell current window
 			set opened to (create tab with default profile)
@@ -112,5 +107,5 @@ if application "iTerm2" is running then
 else
 	return %q
 end if
-`, noWindowsMarker, appleScriptString(command), foundMarker, notRunningMarker)
+`, appleScriptString(app), noWindowsMarker, appleScriptString(command), foundMarker, notRunningMarker)
 }
